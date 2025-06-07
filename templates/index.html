@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Omegle Clone</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    #video-container {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-top: 50px;
+    }
+
+    video {
+      width: 320px;
+      height: 240px;
+      background: #000;
+      border-radius: 10px;
+    }
+
+    #startBtn {
+      display: block;
+      margin: 30px auto;
+      padding: 10px 20px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="video-container">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+  </div>
+
+  <div id="chat-container">
+    <div id="messages"></div>
+    <input type="text" id="messageInput" placeholder="Type a message..." />
+  </div>
+
+  <div id="controls">
+    <button id="startBtn">Start Chat</button>
+    <button id="nextBtn" style="display: none;">Next</button>
+  </div>
+
+  <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+  <script>
+    const nextBtn = document.getElementById('nextBtn');
+const messageInput = document.getElementById('messageInput');
+const messagesDiv = document.getElementById('messages');
+
+startBtn.onclick = async () => {
+    await startLocalStream();
+    socket.emit('join');
+    startBtn.style.display = 'none';
+    nextBtn.style.display = 'inline-block';
+};
+
+nextBtn.onclick = () => {
+    cleanupPeer();
+    socket.emit('join');
+    messagesDiv.innerHTML = '';
+};
+
+messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        const message = messageInput.value;
+        if (message.trim() !== '') {
+            socket.emit('chat_message', { room: roomId, message });
+            addMessage('You: ' + message);
+            messageInput.value = '';
+        }
+    }
+});
+
+socket.on('chat_message', ({ message }) => {
+    addMessage('Stranger: ' + message);
+});
+
+function addMessage(msg) {
+    const p = document.createElement('p');
+    p.textContent = msg;
+    messagesDiv.appendChild(p);
+}
+
+function cleanupPeer() {
+    if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+    }
+    remoteVideo.srcObject = null;
+    if (roomId) {
+        socket.emit('leave_room', { room: roomId });
+        roomId = null;
+    }
+}
+
+  </script>
+</body>
+
+</html>
