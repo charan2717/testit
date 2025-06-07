@@ -67,141 +67,152 @@
 <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 <script>
   const startBtn = document.getElementById('startBtn');
-  const nextBtn = document.getElementById('nextBtn');
-  const localVideo = document.getElementById('localVideo');
-  const remoteVideo = document.getElementById('remoteVideo');
-  const messagesDiv = document.getElementById('messages');
-  const messageInput = document.getElementById('messageInput');
+const nextBtn = document.getElementById('nextBtn');
+const localVideo = document.getElementById('localVideo');
+const remoteVideo = document.getElementById('remoteVideo');
+const messagesDiv = document.getElementById('messages');
+const messageInput = document.getElementById('messageInput');
 
-  const socket = io();
+const socket = io();
 
-  let localStream = null;
-  let peerConnection = null;
-  let roomId = null;
+let localStream = null;
+let peerConnection = null;
+let roomId = null;
 
-  // Use Google's public STUN server
-  const iceServers = {
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  };
+const iceServers = {
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+};
 
-  // Utility to append chat messages
-  function addMessage(msg) {
-    const p = document.createElement('p');
-    p.textContent = msg;
-    messagesDiv.appendChild(p);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+function addMessage(msg) {
+  const p = document.createElement('p');
+  p.textContent = msg;
+  messagesDiv.appendChild(p);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+async function startLocalStream() {
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localVideo.srcObject = localStream;
+  } catch (err) {
+    alert('Error accessing media devices: ' + err);
   }
+}
 
-  // Setup peer connection and event handlers
-  function createPeerConnection() {
-    peerConnection = new RTCPeerConnection(iceServers);
+function createPeerConnection() {
+  peerConnection = new RTCPeerConnection(iceServers);
 
-    // Add local stream tracks to peer connection
-    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+  // Add all local tracks to the connection
+  localStream.getTracks().forEach((track) => {
+    peerConnection.addTrack(track, localStream);
+  });
 
-    peerConnection.ontrack = event => {
-      // Set remote video stream
+  peerConnection.ontrack = (event) => {
+    // event.streams is an array of MediaStreams
+    if (remoteVideo.srcObject !== event.streams[0]) {
       remoteVideo.srcObject = event.streams[0];
-    };
-
-    peerConnection.onicecandidate = event => {
-      if (event.candidate) {
-        socket.emit('signal', { room: roomId, signal: { type: 'candidate', candidate: event.candidate } });
-      }
-    };
-
-    peerConnection.onconnectionstatechange = () => {
-      if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
-        cleanup();
-        addMessage("Peer disconnected.");
-      }
-    };
-  }
-
-  async function startLocalStream() {
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localVideo.srcObject = localStream;
-    } catch (err) {
-      alert("Could not get user media: " + err);
+      console.log('Received remote stream');
     }
-  }
+  };
 
-  function cleanup() {
-    if (peerConnection) {
-      peerConnection.close();
-      peerConnection = null;
+  peerConnection.onicecandidate = (event) => {
+    if (event.candidate) {
+      socket.emit('signal', { room: roomId, signal: { type: 'candidate', candidate: event.candidate } });
     }
-    remoteVideo.srcObject = null;
-    roomId = null;
-  }
+  };
 
-  // Handle socket events
+  peerConnection.oniceconnectionstatechange = () => {
+    if (peerConnection.iceConnectionState === 'disconnected') {
+      addMessage('Disconnected from peer');
+      cleanup();
+    }
+  };
+}
 
-  socket.on('partner_found', async (data) => {
-    roomId = data.room;
-    addMessage("Partner found! Setting up connection...");
-
+async function handleOffer(offer) {
+  if (!peerConnection) {
     createPeerConnection();
+  }
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  socket.emit('signal', { room: roomId, signal: { type: 'answer', sdp: answer.sdp } });
+}
 
-    // Create an offer if we are the caller (decide by comparing socket ids)
-    if (socket.id < data.room) {
-      // Caller creates offer
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit('signal', { room: roomId, signal: { type: 'offer', sdp: offer.sdp } });
-    }
-  });
+async function handleAnswer(answer) {
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+}
 
-  socket.on('signal', async (data) => {
-    if (!peerConnection) {
-      createPeerConnection();
-    }
-    const signal = data.signal;
+async function handleCandidate(candidate) {
+  try {
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (e) {
+    console.error('Error adding received ice candidate', e);
+  }
+}
 
-    if (signal.type === 'offer') {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.emit('signal', { room: roomId, signal: { type: 'answer', sdp: answer.sdp } });
-    } else if (signal.type === 'answer') {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
-    } else if (signal.type === 'candidate') {
-      try {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
-      } catch (err) {
-        console.error("Error adding received ice candidate", err);
-      }
-    }
-  });
+function cleanup() {
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  remoteVideo.srcObject = null;
+  roomId = null;
+}
 
-  socket.on('chat_message', data => {
-    addMessage("Stranger: " + data.message);
-  });
+socket.on('partner_found', async (data) => {
+  roomId = data.room;
+  addMessage('Partner found!');
 
-  // Button handlers
+  createPeerConnection();
 
-  startBtn.onclick = async () => {
-    await startLocalStream();
-    socket.emit('join');
-    startBtn.style.display = 'none';
-    nextBtn.style.display = 'inline-block';
-  };
+  // Determine offerer based on socket id (simple logic)
+  if (socket.id < data.room) {
+    // We create offer
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    socket.emit('signal', { room: roomId, signal: { type: 'offer', sdp: offer.sdp } });
+  }
+});
 
-  nextBtn.onclick = () => {
-    cleanup();
-    socket.emit('join');
-    messagesDiv.innerHTML = '';
-  };
+socket.on('signal', async (data) => {
+  const signal = data.signal;
 
-  messageInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && messageInput.value.trim() !== '') {
-      const message = messageInput.value;
-      socket.emit('chat_message', { room: roomId, message });
-      addMessage("You: " + message);
-      messageInput.value = '';
-    }
-  });
+  if (signal.type === 'offer') {
+    await handleOffer(signal);
+  } else if (signal.type === 'answer') {
+    await handleAnswer(signal);
+  } else if (signal.type === 'candidate') {
+    await handleCandidate(signal.candidate);
+  }
+});
+
+socket.on('chat_message', (data) => {
+  addMessage('Stranger: ' + data.message);
+});
+
+startBtn.onclick = async () => {
+  await startLocalStream();
+  socket.emit('join');
+  startBtn.style.display = 'none';
+  nextBtn.style.display = 'inline-block';
+};
+
+nextBtn.onclick = () => {
+  cleanup();
+  socket.emit('join');
+  messagesDiv.innerHTML = '';
+};
+
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && messageInput.value.trim() !== '') {
+    const message = messageInput.value;
+    socket.emit('chat_message', { room: roomId, message });
+    addMessage('You: ' + message);
+    messageInput.value = '';
+  }
+});
+
 </script>
 
 </body>
