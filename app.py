@@ -10,6 +10,7 @@ app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 waiting_users = []
+user_rooms = {}
 
 @app.route('/')
 def index():
@@ -17,26 +18,40 @@ def index():
 
 @socketio.on('join')
 def handle_join():
+    user_id = request.sid
+
     if waiting_users:
-        partner = waiting_users.pop(0)
+        partner_id = waiting_users.pop(0)
         room_id = f"room_{random.randint(1000, 9999)}"
-        join_room(room_id)
-        emit('partner_found', {'room': room_id}, room=room_id)
-        socketio.emit('partner_found', {'room': room_id}, room=partner)
+
+        join_room(room_id, sid=user_id)
+        join_room(room_id, sid=partner_id)
+
+        user_rooms[user_id] = room_id
+        user_rooms[partner_id] = room_id
+
+        # Notify both users of the match
+        emit('match_found', {'room': room_id}, room=room_id)
     else:
-        waiting_users.append(request.sid)
+        waiting_users.append(user_id)
 
-@socketio.on('signal')
-def handle_signal(data):
+@socketio.on('offer')
+def handle_offer(data):
     room = data['room']
-    signal_data = data['signal']
-    emit('signal', {'signal': signal_data}, room=room, include_self=False)
+    offer = data['offer']
+    emit('offer', {'room': room, 'offer': offer}, room=room, include_self=False)
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    if request.sid in waiting_users:
-        waiting_users.remove(request.sid)
-    print(f"{request.sid} disconnected")
+@socketio.on('answer')
+def handle_answer(data):
+    room = data['room']
+    answer = data['answer']
+    emit('answer', {'room': room, 'answer': answer}, room=room, include_self=False)
+
+@socketio.on('ice_candidate')
+def handle_ice_candidate(data):
+    room = data['room']
+    candidate = data['candidate']
+    emit('ice_candidate', {'candidate': candidate}, room=room, include_self=False)
 
 @socketio.on('chat_message')
 def chat_message(data):
@@ -46,12 +61,26 @@ def chat_message(data):
 
 @socketio.on('leave_room')
 def handle_leave(data):
-    room = data['room']
+    room = data.get('room')
+    user_id = request.sid
     leave_room(room)
+    if user_id in user_rooms:
+        del user_rooms[user_id]
+    emit('chat_message', {'message': 'Stranger has left the chat.'}, room=room, include_self=False)
 
+@socketio.on('disconnect')
+def handle_disconnect():
+    user_id = request.sid
+    if user_id in waiting_users:
+        waiting_users.remove(user_id)
+
+    room = user_rooms.get(user_id)
+    if room:
+        leave_room(room)
+        emit('chat_message', {'message': 'Stranger has disconnected.'}, room=room, include_self=False)
+        del user_rooms[user_id]
+
+    print(f"{user_id} disconnected")
 
 if __name__ == "__main__":
-    import eventlet
-    eventlet.monkey_patch()
     socketio.run(app, host="0.0.0.0", port=5000)
-
