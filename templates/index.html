@@ -139,11 +139,20 @@
     });
 
     socket.on('answer', async ({ answer }) => {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      if (peerConnection && peerConnection.signalingState === 'have-local-offer') {
+        try {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+          console.log('Remote answer set successfully.');
+        } catch (err) {
+          console.error('Failed to set remote answer:', err);
+        }
+      } else {
+        console.warn('Skipping setRemoteDescription(answer). State:', peerConnection?.signalingState);
+      }
     });
 
     socket.on('ice_candidate', ({ candidate }) => {
-      if (candidate) {
+      if (candidate && peerConnection) {
         peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.warn);
       }
     });
@@ -160,6 +169,8 @@
     }
 
     function createPeerConnection() {
+      cleanupPeer(); // Ensure no dangling connections
+
       peerConnection = new RTCPeerConnection(config);
 
       peerConnection.ontrack = (event) => {
@@ -193,10 +204,12 @@
 
     function cleanupPeer() {
       if (peerConnection) {
+        peerConnection.getSenders().forEach(sender => sender.track && sender.track.stop());
         peerConnection.close();
         peerConnection = null;
       }
       remoteVideo.srcObject = null;
+
       if (roomId) {
         socket.emit('leave_room', { room: roomId });
         roomId = null;
