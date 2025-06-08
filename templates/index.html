@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <title>Omegle Clone</title>
@@ -19,25 +18,18 @@
       border-radius: 10px;
     }
 
-    #controls {
+    #controls, #chat-container {
       text-align: center;
       margin-top: 20px;
-    }
-
-    #chat-container {
-      text-align: center;
-      margin-top: 30px;
     }
 
     #messages {
       max-height: 200px;
       overflow-y: auto;
-      margin-bottom: 10px;
+      margin: 10px auto;
       border: 1px solid #ccc;
       padding: 10px;
       width: 60%;
-      margin-left: auto;
-      margin-right: auto;
       background-color: #f9f9f9;
     }
 
@@ -52,7 +44,6 @@
     }
   </style>
 </head>
-
 <body>
   <div id="video-container">
     <video id="localVideo" autoplay muted playsinline></video>
@@ -118,26 +109,22 @@
 
     socket.on('match_found', async ({ room }) => {
       roomId = room;
-      isCaller = true;  // You initiate the call by creating offer
+      isCaller = true;
+
       createPeerConnection();
 
-      // Add all local tracks to the peer connection
       localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
       });
 
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        socket.emit('offer', { room, offer });
-      } catch (err) {
-        console.error('Error creating offer:', err);
-      }
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      socket.emit('offer', { room, offer });
     });
 
     socket.on('offer', async ({ room, offer }) => {
       roomId = room;
-      isCaller = false;  // You answer the call
+      isCaller = false;
 
       createPeerConnection();
 
@@ -145,29 +132,19 @@
         peerConnection.addTrack(track, localStream);
       });
 
-      try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socket.emit('answer', { room, answer });
-      } catch (err) {
-        console.error('Error handling offer:', err);
-      }
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      socket.emit('answer', { room, answer });
     });
 
     socket.on('answer', async ({ answer }) => {
-      try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-      } catch (err) {
-        console.error('Error setting remote description from answer:', err);
-      }
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
     });
 
     socket.on('ice_candidate', ({ candidate }) => {
-      if (peerConnection && candidate) {
-        peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {
-          console.warn('Error adding ICE candidate:', e);
-        });
+      if (candidate) {
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.warn);
       }
     });
 
@@ -186,10 +163,8 @@
       peerConnection = new RTCPeerConnection(config);
 
       peerConnection.ontrack = (event) => {
-        if (remoteVideo.srcObject !== event.streams[0]) {
-          remoteVideo.srcObject = event.streams[0];
-          console.log('Received remote stream');
-        }
+        remoteVideo.srcObject = event.streams[0];
+        console.log('Remote stream added');
       };
 
       peerConnection.onicecandidate = (event) => {
@@ -198,9 +173,9 @@
         }
       };
 
-      peerConnection.oniceconnectionstatechange = () => {
-        console.log('ICE connection state:', peerConnection.iceConnectionState);
-        if (peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'failed') {
+      peerConnection.onconnectionstatechange = () => {
+        console.log('Connection state:', peerConnection.connectionState);
+        if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
           cleanupPeer();
         }
       };
@@ -211,7 +186,7 @@
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localVideo.srcObject = localStream;
       } catch (error) {
-        alert('Failed to access camera/mic: ' + error.message);
+        alert('Error accessing media devices: ' + error.message);
         startBtn.disabled = false;
       }
     }
@@ -229,5 +204,4 @@
     }
   </script>
 </body>
-
 </html>
