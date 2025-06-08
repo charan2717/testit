@@ -42,10 +42,6 @@
       padding: 10px 20px;
       margin: 5px;
     }
-
-    #messageInput:disabled {
-      background-color: #eee;
-    }
   </style>
 </head>
 <body>
@@ -56,7 +52,7 @@
 
   <div id="chat-container">
     <div id="messages"></div>
-    <input type="text" id="messageInput" placeholder="Type a message..." disabled />
+    <input type="text" id="messageInput" placeholder="Type a message..." />
   </div>
 
   <div id="controls">
@@ -92,16 +88,12 @@
       socket.emit('join');
       startBtn.style.display = 'none';
       nextBtn.style.display = 'inline-block';
-      messageInput.disabled = false; // Enable chat input only after start
-      addMessage('System: Looking for a stranger to chat...');
     };
 
     nextBtn.onclick = () => {
       cleanupPeer();
-      socket.emit('join');
       messagesDiv.innerHTML = '';
-      messageInput.disabled = false; // Enable chat input for next chat
-      addMessage('System: Looking for a stranger to chat...');
+      socket.emit('join');
     };
 
     messageInput.addEventListener('keydown', (e) => {
@@ -126,9 +118,13 @@
         peerConnection.addTrack(track, localStream);
       });
 
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit('offer', { room, offer });
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('offer', { room, offer });
+      } catch (err) {
+        console.error('Error creating or sending offer:', err);
+      }
     });
 
     socket.on('offer', async ({ room, offer }) => {
@@ -142,10 +138,14 @@
         peerConnection.addTrack(track, localStream);
       });
 
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.emit('answer', { room, answer });
+      try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('answer', { room, answer });
+      } catch (err) {
+        console.error('Error handling offer:', err);
+      }
     });
 
     socket.on('answer', async ({ answer }) => {
@@ -164,15 +164,28 @@
 
     socket.on('ice_candidate', ({ candidate }) => {
       if (candidate) {
-        console.log('Received ICE candidate:', candidate);
         peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {
-          console.warn('Error adding received ICE candidate:', e);
+          console.warn('Error adding received ice candidate', e);
         });
       }
     });
 
     socket.on('chat_message', ({ message }) => {
       addMessage('Stranger: ' + message);
+    });
+
+    socket.on('chat_message', ({ message }) => {
+      addMessage('Stranger: ' + message);
+    });
+
+    socket.on('leave_room', () => {
+      addMessage('Stranger has left the chat.');
+      cleanupPeer();
+    });
+
+    socket.on('disconnect', () => {
+      addMessage('Stranger has disconnected.');
+      cleanupPeer();
     });
 
     function addMessage(msg) {
@@ -204,17 +217,12 @@
       peerConnection.onconnectionstatechange = () => {
         console.log('Connection state:', peerConnection.connectionState);
         if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
-          addMessage('System: Stranger has disconnected.');
           cleanupPeer();
         }
       };
 
       peerConnection.onsignalingstatechange = () => {
         console.log('Signaling state changed:', peerConnection.signalingState);
-      };
-
-      peerConnection.oniceconnectionstatechange = () => {
-        console.log('ICE connection state:', peerConnection.iceConnectionState);
       };
     }
 
@@ -234,11 +242,11 @@
         peerConnection = null;
       }
       remoteVideo.srcObject = null;
+
       if (roomId) {
         socket.emit('leave_room', { room: roomId });
         roomId = null;
       }
-      messageInput.disabled = true;
     }
   </script>
 </body>
