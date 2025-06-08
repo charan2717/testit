@@ -92,14 +92,14 @@
 
     nextBtn.onclick = () => {
       cleanupPeer();
-      socket.emit('join');
       messagesDiv.innerHTML = '';
+      socket.emit('join');
     };
 
     messageInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
-        const message = messageInput.value;
-        if (message.trim() !== '') {
+        const message = messageInput.value.trim();
+        if (message !== '') {
           socket.emit('chat_message', { room: roomId, message });
           addMessage('You: ' + message);
           messageInput.value = '';
@@ -118,9 +118,13 @@
         peerConnection.addTrack(track, localStream);
       });
 
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit('offer', { room, offer });
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('offer', { room, offer });
+      } catch (err) {
+        console.error('Error creating or sending offer:', err);
+      }
     });
 
     socket.on('offer', async ({ room, offer }) => {
@@ -134,10 +138,14 @@
         peerConnection.addTrack(track, localStream);
       });
 
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.emit('answer', { room, answer });
+      try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('answer', { room, answer });
+      } catch (err) {
+        console.error('Error handling offer:', err);
+      }
     });
 
     socket.on('answer', async ({ answer }) => {
@@ -156,12 +164,28 @@
 
     socket.on('ice_candidate', ({ candidate }) => {
       if (candidate) {
-        peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.warn);
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {
+          console.warn('Error adding received ice candidate', e);
+        });
       }
     });
 
     socket.on('chat_message', ({ message }) => {
       addMessage('Stranger: ' + message);
+    });
+
+    socket.on('chat_message', ({ message }) => {
+      addMessage('Stranger: ' + message);
+    });
+
+    socket.on('leave_room', () => {
+      addMessage('Stranger has left the chat.');
+      cleanupPeer();
+    });
+
+    socket.on('disconnect', () => {
+      addMessage('Stranger has disconnected.');
+      cleanupPeer();
     });
 
     function addMessage(msg) {
@@ -192,7 +216,7 @@
 
       peerConnection.onconnectionstatechange = () => {
         console.log('Connection state:', peerConnection.connectionState);
-        if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+        if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
           cleanupPeer();
         }
       };
@@ -218,6 +242,7 @@
         peerConnection = null;
       }
       remoteVideo.srcObject = null;
+
       if (roomId) {
         socket.emit('leave_room', { room: roomId });
         roomId = null;
