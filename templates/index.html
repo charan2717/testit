@@ -108,6 +108,7 @@
     });
 
     socket.on('match_found', async ({ room }) => {
+      console.log('Match found, you are caller');
       roomId = room;
       isCaller = true;
 
@@ -123,6 +124,7 @@
     });
 
     socket.on('offer', async ({ room, offer }) => {
+      console.log('Received offer');
       roomId = room;
       isCaller = false;
 
@@ -139,7 +141,17 @@
     });
 
     socket.on('answer', async ({ answer }) => {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      console.log('Received answer, signaling state:', peerConnection.signalingState);
+      try {
+        if (peerConnection.signalingState === 'have-local-offer') {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+          console.log('Remote description (answer) set successfully');
+        } else {
+          console.warn('Ignored answer: signaling state is', peerConnection.signalingState);
+        }
+      } catch (err) {
+        console.error('Error setting remote description (answer):', err);
+      }
     });
 
     socket.on('ice_candidate', ({ candidate }) => {
@@ -160,6 +172,11 @@
     }
 
     function createPeerConnection() {
+      if (peerConnection) {
+        console.log('Peer connection already exists. Cleaning up...');
+        cleanupPeer();
+      }
+
       peerConnection = new RTCPeerConnection(config);
 
       peerConnection.ontrack = (event) => {
@@ -178,6 +195,10 @@
         if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
           cleanupPeer();
         }
+      };
+
+      peerConnection.onsignalingstatechange = () => {
+        console.log('Signaling state changed:', peerConnection.signalingState);
       };
     }
 
