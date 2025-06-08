@@ -38,6 +38,9 @@ def handle_join():
 
         print(f"[ROOM] Matched {user_id} with {partner_id} in {room_id}")
         emit('match_found', {'room': room_id}, room=room_id)
+
+        # Notify both clients stranger connected
+        emit('chat_message', {'message': 'Stranger connected.'}, room=room_id)
     else:
         waiting_users.append(user_id)
         print(f"[WAIT] User {user_id} waiting for match")
